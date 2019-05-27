@@ -29,16 +29,20 @@ import graphUtils
 import sys
 import re
 from PIL import Image
-
-
 import argparse
+
 parser = argparse.ArgumentParser(description="Analyze the topics inside a criterion")
 
 validCriterion = ["author", "sourceTitle",  "subject", "authorKeywords", "indexKeywords", "abstract", 
                   "bothKeywords", "documentType", "dataBase", "country", "institution", "institutionWithCountry"]
 
-parser.add_argument("criterion", choices = validCriterion,
+validGraphs = ["bar", "bar_trends", "time_line", "evolution", "word_cloud"]
+
+parser.add_argument("-c","--criterion", choices = validCriterion, default= "authorKeywords",
 help="Select the criterion to analyze the topics")
+
+parser.add_argument("-g","--graphType", choices = validGraphs, default= "bar_trends",
+help="Select the graph type to plot")
 
 parser.add_argument("-l", "--length", type=int, default=10, help="Length of the top topics to analyze, default 10")
 
@@ -66,18 +70,6 @@ help="Plot Y axes in log scale", action="store_true")
 parser.add_argument("--noPlot",
 help="Do not plot the results, use for large amount of topics", action="store_true")
 
-parser.add_argument("--parametric",
-help="Graph accomulative number of publications evolution, and graph the average documents per year vs the h-index",
-                    action="store_true")
-
-parser.add_argument("--parametric2",
-help="Graph on X the total number of publications, and on Y the average documents per year", action="store_true")
-
-parser.add_argument("--parametric3",
-help="Graph accomulative number of publications evolution, and graph the average documents per year vs the percentaje "
-     "of documents in the last years",
-                    action="store_true")
-
 parser.add_argument("--agrForGraph",
 help="To use average growth rate (AGR) instead average documents per year (ADY) in parametric and parametric 2 graphs",
                     action="store_true")
@@ -87,16 +79,9 @@ help="Graph the topics word cloud", action="store_true")
 
 parser.add_argument("--wordCloudMask", default="",  help='PNG mask image to use for wordCloud')
 
-parser.add_argument("--bar",
-help="Graph the topics in horizontal bar", action="store_true")
-
-
-parser.add_argument("--bar2",
-help="Graph the topics in horizontal bar, with the documents for the last years", action="store_true")
-
-
 parser.add_argument("--windowWidth",
-help="Window width in years for average growth rate and average documents per year",type=int, default=1)
+help="Window width in years for average growth rate and average documents per year, minimum 1",
+                    type=int, default=2)
 
 parser.add_argument("-r", "--previousResults",
 help="Analyze based on the previous results", action="store_true")
@@ -121,7 +106,7 @@ parser.add_argument("-f", "--filter", help='Filter to be applied on a sub topic.
   'Example to extract instituions from United States: scientoPy.py institutionWithCountry -f "United States"')
 
 
-
+parser.add_argument("--intermediateFolder", default="",  help='All generated files wil be put in this folder')
 
 # ************************* Program start ********************************************************
 # ************************************************************************************************
@@ -138,17 +123,27 @@ if sys.version_info[0] < 3:
 # Parse arguments
 args = parser.parse_args()
 
+# Validate window Width
+if args.windowWidth < 1:
+  print("ERROR: minimum windowWidth 1")
+  exit()
+
+# Validate start and end years
+if args.startYear > args.endYear:
+  print("ERROR: startYear > endYear")
+  exit()
+
 # Create output folders if not exist
-if not os.path.exists(globalVar.GRAPHS_OUT_FOLDER):
-    os.makedirs(globalVar.GRAPHS_OUT_FOLDER)
-if not os.path.exists(globalVar.RESULTS_FOLDER):
-    os.makedirs(globalVar.RESULTS_FOLDER)
+if not os.path.exists(os.path.join(args.intermediateFolder,globalVar.GRAPHS_OUT_FOLDER)):
+    os.makedirs(os.path.join(args.intermediateFolder,globalVar.GRAPHS_OUT_FOLDER))
+if not os.path.exists(os.path.join(args.intermediateFolder,globalVar.RESULTS_FOLDER)):
+    os.makedirs(os.path.join(args.intermediateFolder,globalVar.RESULTS_FOLDER))
 
 # Select the input file
 if args.previousResults:
-  INPUT_FILE = os.path.join(globalVar.RESULTS_FOLDER, globalVar.OUTPUT_FILE_NAME)
+  INPUT_FILE = os.path.join(args.intermediateFolder,globalVar.RESULTS_FOLDER, globalVar.OUTPUT_FILE_NAME)
 else:
-  INPUT_FILE = os.path.join(globalVar.DATA_OUT_FOLDER, globalVar.OUTPUT_FILE_NAME)
+  INPUT_FILE = os.path.join(args.intermediateFolder,globalVar.DATA_OUT_FOLDER, globalVar.OUTPUT_FILE_NAME)
 
 # Start the list empty
 papersDict = []
@@ -385,7 +380,7 @@ for topicItem in topicResults:
 
   # Calculate AGR from rates
   endYearIndex = len(topicItem["year"]) - 1
-  startYearIndex = endYearIndex - args.windowWidth
+  startYearIndex = endYearIndex - (args.windowWidth - 1)
 
   topicItem["agr"] = \
     round(np.mean(topicItem["PapersCountRate"][startYearIndex : endYearIndex + 1]), 1)
@@ -396,7 +391,7 @@ for topicItem in topicResults:
 
   # Calculate ADY from rates
   endYearIndex = len(topicItem["year"]) - 1
-  startYearIndex = endYearIndex - args.windowWidth
+  startYearIndex = endYearIndex - (args.windowWidth - 1)
 
   topicItem["AverageDocPerYear"] = \
     round(np.mean(topicItem["PapersCount"][startYearIndex : endYearIndex + 1]), 1)
@@ -404,10 +399,9 @@ for topicItem in topicResults:
   topicItem["PapersInLastYears"] = \
     np.sum(topicItem["PapersCount"][startYearIndex : endYearIndex + 1])
 
-  topicItem["PerInLastYears"] = \
-    round(100 * topicItem["PapersInLastYears"] / topicItem["PapersTotal"], 1)
-
-
+  if topicItem["PapersTotal"] > 0:
+    topicItem["PerInLastYears"] = \
+      round(100 * topicItem["PapersInLastYears"] / topicItem["PapersTotal"], 1)
 
 # Scale in percentage per year
 if args.pYear:
@@ -468,24 +462,16 @@ if filterSubTopic != "":
     topicItem["name"] = topicItem["name"].split(",")[0].strip()
 
 # If more than 100 results and not wordCloud, no plot.
-if len(topicResults) > 100 and not args.wordCloud and not args.noPlot:
+if len(topicResults) > 100 and not args.graphType == "word_cloud" and not args.noPlot:
   args.noPlot = True
   print("\nERROR: Not allowed to graph more than 100 results")
 
 # Plot
 if not args.noPlot:
-  if args.parametric:
-    graphUtils.plot_parametric(plt, topicResults, yearArray[startYearIndex], yearArray[endYearIndex], args)
+  if args.graphType == "evolution":
+    graphUtils.plot_evolution(plt, topicResults, yearArray[startYearIndex], yearArray[endYearIndex], args)
 
-  elif args.parametric2:
-    graphUtils.plot_parametric2(plt, topicResults, yearArray[startYearIndex], yearArray[endYearIndex], args)
-    fig = plt.gcf()
-    fig.set_size_inches(args.plotWidth, args.plotHeight)
-
-  elif args.parametric3:
-    graphUtils.plot_parametric3(plt, topicResults, yearArray[startYearIndex], yearArray[endYearIndex], args)
-
-  elif args.wordCloud:
+  if args.graphType == "word_cloud":
     from wordcloud import WordCloud
     my_dpi = 96
     plt.figure(figsize=(1960/my_dpi, 1080/my_dpi), dpi=my_dpi)
@@ -507,20 +493,21 @@ if not args.noPlot:
     plt.imshow(wc, interpolation="bilinear")
     plt.axis("off")
 
-  elif args.bar:
+  if args.graphType == "bar":
     graphUtils.plot_bar_horizontal(plt, topicResults, args)
 
-  elif args.bar2:
-    graphUtils.plot_bar_horizontal2(plt, topicResults, yearArray[startYearIndex], yearArray[endYearIndex], args)
-
-  else:
+  if args.graphType == "bar_trends":
+    graphUtils.plot_bar_horizontal_trends(plt, topicResults,
+                                          yearArray[startYearIndex], yearArray[endYearIndex], args)
+  if args.graphType == "time_line":
     graphUtils.plot_time_line(plt, topicResults, False)
     fig = plt.gcf()
     fig.set_size_inches(args.plotWidth, args.plotHeight)
 
     if args.yLog:
       plt.yscale('log')
-      plt.gca().yaxis.set_minor_formatter(mticker.ScalarFormatter())
+      #TODO: Fix mticker
+      #plt.gca().yaxis.set_minor_formatter(mticker.ScalarFormatter())
 
     if args.pYear:
       plt.ylabel("% of documents per year")
@@ -536,14 +523,14 @@ if not args.noPlot:
   if args.savePlot == "":
     plt.show()
   else:
-    plt.savefig(os.path.join(globalVar.GRAPHS_OUT_FOLDER, args.savePlot),
+    plt.savefig(os.path.join(args.intermediateFolder,globalVar.GRAPHS_OUT_FOLDER, args.savePlot),
     bbox_inches = 'tight', pad_inches = 0.01)
     print("Plot saved on: " + os.path.join(globalVar.GRAPHS_OUT_FOLDER, args.savePlot))
 
 
-paperSave.saveTopResults(topicResults, args.criterion)
-paperSave.saveExtendedResults(topicResults, args.criterion)
+paperSave.saveTopResults(topicResults, args.criterion,args.intermediateFolder)
+paperSave.saveExtendedResults(topicResults, args.criterion,args.intermediateFolder)
 
 # Only save results if that is result of a not previous result
 if not args.previousResults:
-  paperSave.saveResults(papersDictOut, os.path.join(globalVar.RESULTS_FOLDER, globalVar.OUTPUT_FILE_NAME))
+  paperSave.saveResults(papersDictOut, os.path.join(args.intermediateFolder,globalVar.RESULTS_FOLDER, globalVar.OUTPUT_FILE_NAME))

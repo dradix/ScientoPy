@@ -37,8 +37,8 @@ DEFAULT_PLOT_HEIGHT = 4.8
 
 
 # Default output files and folders
-PREPROCESS_LOG_FILE = "PreprocessedBrief.tsv"
-OUTPUT_FILE_NAME = "papersPreprocessed.tsv"
+PREPROCESS_LOG_FILE = "PreprocessedBrief.csv"
+OUTPUT_FILE_NAME = "papersPreprocessed.csv"
 OUTPUT_FILE_BIB = "bibliography.bib"
 DATA_OUT_FOLDER = "dataPre"
 GRAPHS_OUT_FOLDER = "graphs"
@@ -106,4 +106,4 @@ papersWoS = 0
 totalAfterRemDupl = 0
 
 
-SCIENTOPY_VERSION = "1.3.5"
+SCIENTOPY_VERSION = "1.4.0"
